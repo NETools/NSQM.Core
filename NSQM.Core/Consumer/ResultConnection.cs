@@ -21,9 +21,9 @@ namespace NSQM.Core.Consumer
             _userId = userId;
         }
 
-        public async Task<ApiResponseL3<TaskData>> Done(byte[] resultData, TaskStatus taskStatus)
+        public async Task<ApiResponseL3<TaskData>?> Done(byte[] resultData, TaskStatus taskStatus)
         {
-            var taskMessage = NSQMTaskMessage.Build(_userId, _userId, _taskMessage.FromId, _taskMessage.TaskName, _taskMessage.TaskId, _taskMessage.ChannelId, taskStatus, resultData, UserType.Producer, UserType.Consumer, Encoding.UTF8);
+            var taskMessage = NSQMTaskMessage.Build(_userId, _userId, _taskMessage.FromId, _taskMessage.TaskName, _taskMessage.TaskId, _taskMessage.ChannelId, taskStatus, resultData, UserType.Producer, UserType.Consumer, Encoding.UTF8, false);
 
             return await _nsqmWebSocket.SendAndReceive<TaskData>(taskMessage, CancellationToken.None);
         }

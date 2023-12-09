@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 
 namespace NSQM.Core.Model
 {
-	public class ReceivedTask
+	public class ReceivedMessage
 	{
 		public Guid FromId { get; set; }
 		public Guid TaskId { get; set; }

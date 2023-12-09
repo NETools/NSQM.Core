@@ -16,19 +16,19 @@ namespace NSQM.Core.Consumer
 {
 	public class NSQMConsumer
 	{
-		private HttpClient _httpClient;
 		private NSQMBasicWebSocket _nsqmSocket;
 		private string _host;
 		
 		public Guid UserId { get; private set; }
 
-		public event Action<ReceivedTask, ResultConnection>? TaskReceived;
+		public event Action<ReceivedMessage, ResultConnection>? MessageReceived;
+		public event Action<ReceivedMessage>? MessageStreamReceived;
+
 		public NSQMConsumer(string host, Guid id)
 		{
 			UserId = id;
 
 			_host = host;
-			_httpClient = new HttpClient();
 		}
 
 		public async Task Connect(CancellationToken cancellationToken)
@@ -37,25 +37,29 @@ namespace NSQM.Core.Consumer
 			await webSocket.ConnectAsync(new Uri($"ws://{_host}/"), cancellationToken);
 
 			_nsqmSocket = new NSQMBasicWebSocket(webSocket);
-			_nsqmSocket.MessageReceived += MessageReceived; ;
+			_nsqmSocket.ProcessMessage += ProcessMessage; ;
 
 			Task.Run(async () => await _nsqmSocket.Start());
 		}
 
-		private void MessageReceived(NSQMessage message)
+		private void ProcessMessage(NSQMessage message)
 		{
 			switch (message.Type)
 			{
 				case MessageType.Task:
+				case MessageType.TaskStream:
 					var nsqmTaskMessage = message.StructBuffer.ToStruct<NSQMTaskMessage>(Encoding.UTF8);
-					var receivedTask = new ReceivedTask()
+					var receivedTask = new ReceivedMessage()
 					{
 						Content = nsqmTaskMessage.Content,
 						FromId = nsqmTaskMessage.FromId,
 						Name = nsqmTaskMessage.TaskName,
 						TaskId = nsqmTaskMessage.TaskId
 					};
-					TaskReceived?.Invoke(receivedTask, new ResultConnection(_nsqmSocket, nsqmTaskMessage, UserId));
+					if (message.Type == MessageType.Task)
+						MessageReceived?.Invoke(receivedTask, new ResultConnection(_nsqmSocket, nsqmTaskMessage, UserId));
+					else if (message.Type == MessageType.TaskStream)
+						MessageStreamReceived?.Invoke(receivedTask);
 					break;
 			}
 		}

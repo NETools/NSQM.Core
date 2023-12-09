@@ -12,12 +12,12 @@ namespace NSQM.Core.Networking
 {
     internal class NSQMBasicWebSocket : NSQMWebSocket
     {
-        public event Action<NSQMessage>? MessageReceived;
+        public event Action<NSQMessage>? ProcessMessage;
         public NSQMBasicWebSocket(WebSocket webSocket) : base(webSocket) { }
 
         protected override Task HandleMessage(NSQMessage message)
         {
-            MessageReceived?.Invoke(message);
+            ProcessMessage?.Invoke(message);
             return Task.CompletedTask;
         }
     }

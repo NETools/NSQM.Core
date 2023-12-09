@@ -21,10 +21,11 @@ namespace NSQM.Core.Producer
 		private HttpClient _httpClient;
 		private NSQMBasicWebSocket _nsqmSocket;
 		private string _host;
+		private Dictionary<Guid, MessageHandler> _publishedMessages = new Dictionary<Guid, MessageHandler>();
 
 		public Guid UserId { get; private set; }
-		
-		public event Action<ReceivedTask, AcceptConnection>? TaskFinished;
+
+		public event Action<ReceivedMessage, AcceptConnection>? Mailbox;
 
 		public NSQMProducer(string host, Guid id)
 		{
@@ -40,7 +41,7 @@ namespace NSQM.Core.Producer
 			await webSocket.ConnectAsync(new Uri($"ws://{_host}/"), cancellationToken);
 			
 			_nsqmSocket = new NSQMBasicWebSocket(webSocket);
-			_nsqmSocket.MessageReceived += MessageReceived;
+			_nsqmSocket.ProcessMessage += MessageReceived;
 
 			Task.Run(async () => await _nsqmSocket.Start());
 		}
@@ -51,14 +52,25 @@ namespace NSQM.Core.Producer
 			{
 				case MessageType.Task:
 					var nsqmTaskMessage = message.StructBuffer.ToStruct<NSQMTaskMessage>(Encoding.UTF8);
-					var receivedTask = new ReceivedTask()
+					var receivedTask = new ReceivedMessage()
 					{
 						Content = nsqmTaskMessage.Content,
 						FromId = nsqmTaskMessage.FromId,
 						Name = nsqmTaskMessage.TaskName,
 						TaskId = nsqmTaskMessage.TaskId
 					};
-					TaskFinished?.Invoke(receivedTask, new AcceptConnection(_nsqmSocket, nsqmTaskMessage));
+
+					var connection = new AcceptConnection(_nsqmSocket, nsqmTaskMessage);
+
+					if (_publishedMessages.ContainsKey(receivedTask.TaskId))
+					{
+						_publishedMessages[receivedTask.TaskId].Acivate(receivedTask, connection);
+						_publishedMessages.Remove(receivedTask.TaskId);
+					}
+					else
+					{
+						Mailbox?.Invoke(receivedTask, connection);
+					}
 					break;
 			}
 		}
@@ -92,7 +104,7 @@ namespace NSQM.Core.Producer
 			return await _nsqmSocket.SendAndReceive<object>(subscribeMessage, CancellationToken.None);
 		}
 
-		public async Task<ApiResponseL3<User>?> PublishTask(Channel channel, string taskName, byte[] content)
+		public async Task<MessageHandler> PublishMessage(Channel channel, string taskName, byte[] content)
 		{
 			_httpClient.DefaultRequestHeaders.Accept.Clear();
 			_httpClient.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("*/*"));
@@ -116,13 +128,21 @@ namespace NSQM.Core.Producer
 				new StringContent(JsonSerializer.Serialize(taskData), Encoding.UTF8, "application/json"));
 
 			var response = await message.Content.ReadAsStringAsync();
-			var instance = JsonSerializer.Deserialize<ApiResponseL3<User>>(response);
-			return instance;
+			var parsedResponse = JsonSerializer.Deserialize<ApiResponseL3<User>>(response);
+
+			var messageHandler = new MessageHandler()
+			{
+				Response = parsedResponse
+			};
+
+			_publishedMessages.Add(taskData.TaskId, messageHandler);
+			return messageHandler;
 		}
 
-
-	
-
-		
+		public async Task StreamMessage(Channel channel, string taskName, byte[] content)
+		{
+			var streamMessage = NSQMTaskMessage.Build(UserId, UserId, Guid.Empty, taskName, Guid.NewGuid(), channel.ChannelId, Data.Extensions.TaskStatus.TaskStarted, content, UserType.Consumer, UserType.Producer, Encoding.UTF8, true);
+			await _nsqmSocket.Send(streamMessage);
+		}	
 	}
 }
