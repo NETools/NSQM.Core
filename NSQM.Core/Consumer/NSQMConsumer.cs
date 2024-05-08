@@ -8,14 +8,18 @@ using NSQM.Data.Model.Response;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Net.Http.Headers;
+using System.Net.Http;
 using System.Net.WebSockets;
 using System.Text;
+using System.Text.Json;
 using System.Threading;
 
 namespace NSQM.Core.Consumer
 {
-	public class NSQMConsumer
+	public class NSQMConsumer : IDisposable
 	{
+		private HttpClient _httpClient = new HttpClient();
 		private NSQMBasicWebSocket _nsqmSocket;
 		private string _host;
 		
@@ -40,6 +44,19 @@ namespace NSQM.Core.Consumer
 			_nsqmSocket.ProcessMessage += ProcessMessage; ;
 
 			Task.Run(async () => await _nsqmSocket.Start());
+		}
+
+		public async Task<ApiResponseL3<Channel>?> OpenChannel(string channelName)
+		{
+			_httpClient.DefaultRequestHeaders.Accept.Clear();
+			_httpClient.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("*/*"));
+
+			var message = await _httpClient.PostAsync(
+				$"http://{_host}/CreateChannel/{channelName}", null);
+
+			var response = await message.Content.ReadAsStringAsync();
+			var instance = JsonSerializer.Deserialize<ApiResponseL3<Channel>>(response);
+			return instance;
 		}
 
 		private void ProcessMessage(NSQMessage message)
@@ -73,6 +90,12 @@ namespace NSQM.Core.Consumer
 		{
 			var subscribeMessage = NSQMSubscribeMessage.Build(UserId, channelId, UserType.Consumer, Encoding.UTF8);
 			return await _nsqmSocket.SendAndReceive<User>(subscribeMessage, CancellationToken.None);
+		}
+
+		public void Dispose()
+		{
+			_nsqmSocket.Dispose();
+			_httpClient.Dispose();
 		}
 	}
 }

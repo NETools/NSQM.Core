@@ -37,7 +37,7 @@ namespace NSQM.Core.Producer
 			return this;
 		}
 
-		internal void Acivate(ReceivedMessage message, AcceptConnection connection)
+		internal void Activate(ReceivedMessage message, AcceptConnection connection)
 		{
 			_result = new MessageResult(message, connection);
 			_callBack?.Invoke(_result);

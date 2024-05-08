@@ -16,7 +16,7 @@ using System.Threading.Tasks;
 
 namespace NSQM.Core.Producer
 {
-    public class NSQMProducer
+    public class NSQMProducer : IDisposable
 	{
 		private HttpClient _httpClient;
 		private NSQMBasicWebSocket _nsqmSocket;
@@ -64,7 +64,7 @@ namespace NSQM.Core.Producer
 
 					if (_publishedMessages.ContainsKey(receivedTask.TaskId))
 					{
-						_publishedMessages[receivedTask.TaskId].Acivate(receivedTask, connection);
+						_publishedMessages[receivedTask.TaskId].Activate(receivedTask, connection);
 						_publishedMessages.Remove(receivedTask.TaskId);
 					}
 					else
@@ -75,44 +75,29 @@ namespace NSQM.Core.Producer
 			}
 		}
 
-		public async Task<ApiResponseL3<Channel>?> OpenChannel(string channelName)
-		{
-			_httpClient.DefaultRequestHeaders.Accept.Clear();
-			_httpClient.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("*/*"));
-
-			var message = await _httpClient.PostAsync(
-				$"http://{_host}/CreateChannel/{channelName}", null);
-
-			var response = await message.Content.ReadAsStringAsync();
-			var instance = JsonSerializer.Deserialize<ApiResponseL3<Channel>>(response);
-			return instance;
-		}
-
 		public async Task Close()
 		{
 			await _nsqmSocket.Close();
 		}
 
-		public async Task<ApiResponseL3<object>?> Subscribe(Channel? channel)
+		public async Task<ApiResponseL3<User>?> Subscribe(string channelId)
 		{
-			if(channel == null)
-			{
-				return ApiResponseL3<object>.Failed("User could not be added because channel was null", ApiResponseL1.ChannelNotFound);
-
-			}
-			var subscribeMessage = NSQMSubscribeMessage.Build(UserId, channel.ChannelId, UserType.Producer, Encoding.UTF8);
-			return await _nsqmSocket.SendAndReceive<object>(subscribeMessage, CancellationToken.None);
+			var subscribeMessage = NSQMSubscribeMessage.Build(UserId, channelId, UserType.Producer, Encoding.UTF8);
+			return await _nsqmSocket.SendAndReceive<User>(subscribeMessage, CancellationToken.None);
 		}
 
-		public async Task<MessageHandler> PublishMessage(Channel channel, string taskName, byte[] content)
+		public async Task<MessageHandler> PublishMessage(string channelId, string taskName, byte[] content, Guid? receiverId = null)
 		{
+			if (receiverId == null)
+				receiverId = Guid.Empty;
+
 			_httpClient.DefaultRequestHeaders.Accept.Clear();
 			_httpClient.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("*/*"));
 
 			var taskData = new TaskData()
 			{
 				PhaseId = Guid.NewGuid(),
-				ChannelId = channel.ChannelId,
+				ChannelId = channelId,
 				SenderType = UserType.Producer,
 				Status = Data.Extensions.TaskStatus.TaskStarted,
 				AddresseeType = UserType.Consumer,
@@ -120,8 +105,11 @@ namespace NSQM.Core.Producer
 				TaskId = Guid.NewGuid(),
 				FromId = UserId,
 				TaskName = taskName,
-				ToId = Guid.Empty
+				ToId = receiverId.Value
 			};
+
+			var messageHandler = new MessageHandler();
+			_publishedMessages.Add(taskData.TaskId, messageHandler);
 
 			var message = await _httpClient.PostAsync(
 				$"http://{_host}/CreateTask/",
@@ -130,19 +118,24 @@ namespace NSQM.Core.Producer
 			var response = await message.Content.ReadAsStringAsync();
 			var parsedResponse = JsonSerializer.Deserialize<ApiResponseL3<User>>(response);
 
-			var messageHandler = new MessageHandler()
-			{
-				Response = parsedResponse
-			};
-
-			_publishedMessages.Add(taskData.TaskId, messageHandler);
+			messageHandler.Response = parsedResponse;
+	
 			return messageHandler;
 		}
 
-		public async Task StreamMessage(Channel channel, string taskName, byte[] content)
+		public async Task StreamMessage(string channelId, string taskName, byte[] content, Guid? receiverId = null)
 		{
-			var streamMessage = NSQMTaskMessage.Build(UserId, UserId, Guid.Empty, taskName, Guid.NewGuid(), channel.ChannelId, Data.Extensions.TaskStatus.TaskStarted, content, UserType.Consumer, UserType.Producer, Encoding.UTF8, true);
+			if (receiverId == null)
+				receiverId = Guid.Empty;
+
+			var streamMessage = NSQMTaskMessage.Build(UserId, UserId, receiverId.Value, taskName, Guid.NewGuid(), channelId, Data.Extensions.TaskStatus.TaskStarted, content, UserType.Consumer, UserType.Producer, Encoding.UTF8, true);
 			await _nsqmSocket.Send(streamMessage);
-		}	
+		}
+
+		public void Dispose()
+		{
+			_httpClient.Dispose();
+			_nsqmSocket.Dispose();
+		}
 	}
 }
